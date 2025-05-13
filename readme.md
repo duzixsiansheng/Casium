@@ -1,7 +1,8 @@
 # Document Scanner Project
 
 This is a tool to extract information from documents
-![webpage](upload/main.png)
+
+![webpage](uploads/main.png)
 
 
 
