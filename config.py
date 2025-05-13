@@ -5,7 +5,7 @@ class Config:
     """Application configuration"""
     
     # API Keys
-    OPENAI_API_KEY: str = os.getenv("OPENAI_API_KEY", "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")
+    OPENAI_API_KEY: str = os.getenv("OPENAI_API_KEY", "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")
     
     # OpenAI API settings
     OPENAI_BASE_URL: str = "https://api.openai.com/v1/chat/completions"
