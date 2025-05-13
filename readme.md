@@ -57,6 +57,7 @@ npm install
 bash start.sh
 ```
 
+For openai api key, please check config.py file 
 You can run the webpage on http://localhost:3000/  by defalut (You could change that by editing the config file)
 
 
