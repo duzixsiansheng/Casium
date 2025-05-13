@@ -1,5 +1,10 @@
 # Document Scanner Project
 
+This is a tool to extract information from documents
+[upload/main.png]
+
+
+
 ## Installation
 
 ### Backend
