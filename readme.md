@@ -21,6 +21,9 @@ npm install
 bash start.sh
 ```
 
+You can run the webpage on http://localhost:3000/  by defalut (You could change that by editing the config file)
+
+
 ## Database
 
 ### Initialize new database
