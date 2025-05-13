@@ -8,6 +8,36 @@ This is a tool to extract information from documents
 
 ## Installation
 
+### Environment
+
+If you prefer conda:
+
+```bash
+conda create --name casium_tool python=3.10
+```
+
+And for easier handling pdf files, please also install Poppler:
+
+```bash
+conda install -c conda-forge poppler
+```
+
+or
+
+for macOS users:
+
+```bash
+brew install poppler
+```
+
+for Linux users:
+
+```bash
+sudo apt-get update
+sudo apt-get install poppler-utils
+```
+
+
 ### Backend
 
 ```bash
