@@ -120,17 +120,20 @@ class FieldExtractor:
         
         {field_list}
         
-        Instructions:
-        1. Format the response as a JSON object with these exact field names
-        2. For dates, standardize to MM/DD/YYYY format
-        3. For names:
-           - If the document shows first and last names separately, extract them as is
-           - If only a full name is shown, extract it as "full_name"
-           - If you see a name like "SMITH, JOHN" extract as first_name: "JOHN", last_name: "SMITH"
-           - For Asian names (e.g., Chinese, Korean, Japanese), the family name often comes first
-        4. If a field is not found or unclear, use null
-        5. For country, use lowercase with underscores (e.g., "united_states")
-        6. Extract exactly what you see - let post-processing handle standardization
+        Important Instructions for Name Extraction:
+        1. If the document shows a complete name in one field, extract it as "full_name"
+        2. If the document shows first and last names in separate fields, extract them as "first_name" and "last_name"
+        3. If you can see any name information, extract what you can see
+        4. Common patterns to recognize:
+           - "SMITH, JOHN" format: extract as full_name (we'll parse it later)
+           - Separate fields labeled "First Name" and "Last Name": extract both
+           - Single name field: extract as full_name
+        
+        General Instructions:
+        - Extract ONLY what is visible on the document
+        - For dates: extract in the format shown (we'll standardize later)
+        - For missing fields: use null
+        - Do NOT make assumptions or split/combine fields yourself
         
         Example format:
         {example_json}
@@ -140,9 +143,16 @@ class FieldExtractor:
     
     def _get_field_descriptions(self, document_type: DocumentType) -> Dict[str, str]:
         """Get human-readable descriptions for each field"""
+        # Common name field descriptions for all document types
+        common_name_fields = {
+            "full_name": "Complete name as shown on document",
+            "first_name": "First name (given name)",
+            "last_name": "Last name (surname/family name)"
+        }
+        
         descriptions = {
             DocumentType.PASSPORT: {
-                "full_name": "Full name of the passport holder",
+                **common_name_fields,
                 "date_of_birth": "Date of birth (MM/DD/YYYY format)",
                 "country": "Issuing country (lowercase with underscores)",
                 "issue_date": "Date of issue (MM/DD/YYYY format)",
@@ -150,20 +160,18 @@ class FieldExtractor:
                 "passport_number": "Passport number/document number"
             },
             DocumentType.DRIVER_LICENSE: {
+                **common_name_fields,
                 "license_number": "Driver's license number",
                 "date_of_birth": "Date of birth (MM/DD/YYYY format)",
                 "issue_date": "Issue date (MM/DD/YYYY format)",
                 "expiration_date": "Expiration date (MM/DD/YYYY format)",
-                "first_name": "First name only",
-                "last_name": "Last name only",
                 "address": "Full address"
             },
             DocumentType.EAD_CARD: {
+                **common_name_fields,
                 "card_number": "USCIS card number (with hyphens)",
                 "category": "Category code (e.g., C09)",
                 "card_expires_date": "Card expiration date (MM/DD/YYYY format)",
-                "last_name": "Last name only",
-                "first_name": "First name only",
                 "date_of_birth": "Date of birth (MM/DD/YYYY format)"
             }
         }
@@ -195,43 +203,37 @@ class FieldExtractor:
         """Post-process extracted fields for standardization"""
         processed = {}
         
-        # Get country information if available (for name parsing)
+        # Get country information if available (for name parsing and date formatting)
         country = fields.get('country', None)
         
+        # Collect all date fields for context-based parsing
+        date_fields = []
+        for field, value in fields.items():
+            if value and any(date_keyword in field for date_keyword in ["date", "expires"]):
+                date_fields.append(str(value))
+        
+        # First, process all extracted fields
         for field, value in fields.items():
             if value is None or value == "null":
                 processed[field] = None
                 continue
             
-            # Standardize dates
+            # Standardize dates with country context
             if any(date_keyword in field for date_keyword in ["date", "expires"]):
-                processed[field] = standardize_date(str(value))
+                # Use the enhanced date standardizer with country and context
+                processed[field] = standardize_date(
+                    str(value), 
+                    country=country,
+                    context_dates=date_fields
+                )
             
-            # Handle name fields intelligently
-            elif field == "full_name":
-                # For passports, we might need to split the full name
-                full_name = str(value).strip()
-                processed[field] = normalize_name(full_name)
-                
-                # If the document type expects separate first/last names but we only have full_name
-                required_fields = DOCUMENT_FIELDS.get(document_type, {})
-                if "first_name" in required_fields or "last_name" in required_fields:
-                    # Use intelligent name parsing
-                    first_name, last_name = guess_name_order(full_name, country)
-                    if "first_name" in required_fields and "first_name" not in fields:
-                        processed["first_name"] = normalize_name(first_name)
-                    if "last_name" in required_fields and "last_name" not in fields:
-                        processed["last_name"] = normalize_name(last_name)
-            
-            # Handle cases where names are already split but might need normalization
-            elif field in ["first_name", "last_name"]:
+            # Normalize names (but don't split yet)
+            elif field in ["full_name", "first_name", "last_name"]:
                 processed[field] = normalize_name(str(value))
             
             # Clean up country names
             elif field == "country":
-                # Standardize country format
                 country_value = str(value).lower().strip()
-                # Remove special characters and normalize
                 country_value = re.sub(r'[^\w\s]', '', country_value)
                 country_value = country_value.replace(' ', '_')
                 processed[field] = country_value
@@ -239,22 +241,54 @@ class FieldExtractor:
             else:
                 processed[field] = str(value).strip()
         
-        # Handle fuzzy name matching - if we have a full name field but need first/last
-        if document_type in [DocumentType.DRIVER_LICENSE, DocumentType.EAD_CARD]:
-            # These documents typically need separate first/last names
-            if "full_name" in fields and ("first_name" not in processed or "last_name" not in processed):
-                full_name = fields.get("full_name", "")
-                if full_name:
-                    first_name, last_name = guess_name_order(full_name, country)
-                    if "first_name" not in processed:
-                        processed["first_name"] = normalize_name(first_name)
-                    if "last_name" not in processed:
-                        processed["last_name"] = normalize_name(last_name)
+        # Now ensure all three name fields are populated
+        # Process in order: full_name first, then first/last names
         
-        # Ensure all required fields are present
+        # Step 1: If we have full_name, ensure we also have first/last
+        if "full_name" in processed and processed["full_name"]:
+            if "first_name" not in processed or "last_name" not in processed or \
+               not processed.get("first_name") or not processed.get("last_name"):
+                first_name, last_name = guess_name_order(processed["full_name"], country)
+                
+                if not processed.get("first_name"):
+                    processed["first_name"] = first_name
+                
+                if not processed.get("last_name"):
+                    processed["last_name"] = last_name
+        
+        # Step 2: If we have first/last but no full_name, create it
+        if ("first_name" in processed and processed["first_name"]) or \
+           ("last_name" in processed and processed["last_name"]):
+            if "full_name" not in processed or not processed.get("full_name"):
+                first = processed.get("first_name", "")
+                last = processed.get("last_name", "")
+                if first or last:
+                    processed["full_name"] = f"{first} {last}".strip()
+        
+        # Step 3: Final validation - ensure all name fields are consistent
+        # If we still have any None values in name fields, try to fill them
+        if processed.get("full_name") and (not processed.get("first_name") or not processed.get("last_name")):
+            first_name, last_name = guess_name_order(processed["full_name"], country)
+            if not processed.get("first_name"):
+                processed["first_name"] = first_name
+            if not processed.get("last_name"):
+                processed["last_name"] = last_name
+        
+        # If we have first and/or last but no full name, create it
+        if (processed.get("first_name") or processed.get("last_name")) and not processed.get("full_name"):
+            first = processed.get("first_name", "")
+            last = processed.get("last_name", "")
+            processed["full_name"] = f"{first} {last}".strip()
+        
+        # Ensure all required fields are present (set to None if missing)
         required_fields = DOCUMENT_FIELDS.get(document_type, {})
         for field in required_fields:
             if field not in processed:
                 processed[field] = None
+        
+        # Final cleanup: if any name field is empty string, convert to None
+        for name_field in ["full_name", "first_name", "last_name"]:
+            if name_field in processed and processed[name_field] == "":
+                processed[name_field] = None
         
         return processed
