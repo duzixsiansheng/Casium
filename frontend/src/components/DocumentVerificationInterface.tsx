@@ -81,6 +81,16 @@ const DocumentVerificationInterface: React.FC = () => {
     const file = event.target.files?.[0];
     if (!file) return;
 
+    const allowed = ['png','jpg','jpeg','pdf'];
+    const ext = file.name.split('.').pop()?.toLowerCase() || '';
+    if (!allowed.includes(ext)) {
+      alert('Only PNG, JPG, JPEG, and PDF files are allowed.');
+      event.target.value = '';
+      return;
+}
+
+
+
     setSelectedFile(file);
     
     // Create image preview
@@ -248,7 +258,7 @@ const DocumentVerificationInterface: React.FC = () => {
               
               <input
                 type="file"
-                accept="image/*,.pdf"
+                accept=".png,.jpg,.jpeg,.pdf"
                 onChange={handleFileUpload}
                 className="hidden"
                 id="file-upload"
